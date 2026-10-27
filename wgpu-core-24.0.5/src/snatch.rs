@@ -87,27 +87,33 @@ impl std::fmt::Display for LockTrace {
 impl LockTrace {
     #[track_caller]
     fn enter(purpose: &'static str) {
-        let new = LockTrace {
-            purpose,
-            caller: Location::caller(),
-            backtrace: Backtrace::capture(),
-        };
+        // Resource Drop can run from a native process-exit callback after
+        // Rust has destroyed this diagnostic TLS. Keep the actual snatch lock,
+        // but skip tracing when the per-thread diagnostic no longer exists.
+        let caller = Location::caller();
+        let _ = SNATCH_LOCK_TRACE.try_with(|trace| {
+            let new = LockTrace {
+                purpose,
+                caller,
+                backtrace: Backtrace::capture(),
+            };
 
-        if let Some(prev) = SNATCH_LOCK_TRACE.take() {
-            let current = thread::current();
-            let name = current.name().unwrap_or("<unnamed>");
-            panic!(
-                "thread '{name}' attempted to acquire a snatch lock recursively.\n\
-                 - Currently trying to acquire {new}\n\
-                 - Previously acquired {prev}",
-            );
-        } else {
-            SNATCH_LOCK_TRACE.set(Some(new));
-        }
+            if let Some(prev) = trace.take() {
+                let current = thread::current();
+                let name = current.name().unwrap_or("<unnamed>");
+                panic!(
+                    "thread '{name}' attempted to acquire a snatch lock recursively.\n\
+                     - Currently trying to acquire {new}\n\
+                     - Previously acquired {prev}",
+                );
+            } else {
+                trace.set(Some(new));
+            }
+        });
     }
 
     fn exit() {
-        SNATCH_LOCK_TRACE.take();
+        let _ = SNATCH_LOCK_TRACE.try_with(|trace| trace.take());
     }
 }
 

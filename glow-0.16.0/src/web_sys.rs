@@ -6134,6 +6134,10 @@ impl HasContext for Context {
         }
     }
 
+    unsafe fn sample_mask_i(&self, _index: u32, _mask: u32) {
+        // WebGL exposes sample coverage but not an exact per-sample mask.
+    }
+
     unsafe fn get_internal_format_i32_slice(
         &self,
         target: u32,

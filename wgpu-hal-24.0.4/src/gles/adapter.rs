@@ -990,6 +990,7 @@ impl crate::Adapter for super::Adapter {
             },
             queue: super::Queue {
                 shared: Arc::clone(&self.shared),
+                main_vao,
                 features,
                 draw_fbo: unsafe { gl.create_framebuffer() }
                     .map_err(|_| crate::DeviceError::OutOfMemory)?,

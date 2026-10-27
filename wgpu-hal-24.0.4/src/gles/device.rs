@@ -1412,6 +1412,7 @@ impl crate::Device for super::Device {
                 .depth_stencil
                 .as_ref()
                 .map(|ds| conv::map_stencil(&ds.stencil)),
+            sample_mask: desc.multisample.mask,
             alpha_to_coverage_enabled: desc.multisample.alpha_to_coverage_enabled,
         })
     }

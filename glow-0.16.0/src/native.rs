@@ -4498,6 +4498,10 @@ impl HasContext for Context {
         gl.SampleCoverage(value, invert as u8);
     }
 
+    unsafe fn sample_mask_i(&self, index: u32, mask: u32) {
+        self.raw.SampleMaski(index, mask);
+    }
+
     unsafe fn get_internal_format_i32_slice(
         &self,
         target: u32,

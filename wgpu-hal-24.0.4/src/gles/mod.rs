@@ -310,6 +310,8 @@ pub struct ShaderClearProgram {
 
 pub struct Queue {
     shared: Arc<AdapterShared>,
+    // Borrowed from the owning Device, which outlives its queue.
+    main_vao: glow::VertexArray,
     features: wgt::Features,
     draw_fbo: glow::Framebuffer,
     copy_fbo: glow::Framebuffer,
@@ -433,6 +435,16 @@ impl Texture {
             // doing `TEXTURE_2D` instead
             wgt::TextureDimension::D1 => glow::TEXTURE_2D,
             wgt::TextureDimension::D2 => {
+                // Multisampled textures are created only when sampled/copied;
+                // render-only attachments use renderbuffers. Their GL target
+                // must match tex_storage_2d_multisample and sampler2DMS.
+                if desc.sample_count > 1 {
+                    return if desc.size.depth_or_array_layers == 1 {
+                        glow::TEXTURE_2D_MULTISAMPLE
+                    } else {
+                        glow::TEXTURE_2D_MULTISAMPLE_ARRAY
+                    };
+                }
                 // HACK: detect a cube map; forces cube compatible textures to be cube textures
                 match (desc.is_cube_compatible(), desc.size.depth_or_array_layers) {
                     (false, 1) => glow::TEXTURE_2D,
@@ -456,7 +468,10 @@ impl Texture {
             wgt::TextureViewDimension::D3 => glow::TEXTURE_3D,
         };
 
-        if expected_target == target {
+        if expected_target == target ||
+            (expected_target == glow::TEXTURE_2D && target == glow::TEXTURE_2D_MULTISAMPLE) ||
+            (expected_target == glow::TEXTURE_2D_ARRAY &&
+                target == glow::TEXTURE_2D_MULTISAMPLE_ARRAY) {
             return;
         }
 
@@ -703,6 +718,7 @@ pub struct RenderPipeline {
     depth: Option<DepthState>,
     depth_bias: wgt::DepthBiasState,
     stencil: Option<StencilState>,
+    sample_mask: u64,
     alpha_to_coverage_enabled: bool,
 }
 
@@ -1002,6 +1018,7 @@ enum Command {
     SetDepthBias(wgt::DepthBiasState),
     ConfigureDepthStencil(crate::FormatAspects),
     SetAlphaToCoverage(bool),
+    SetSampleMask(u64),
     SetVertexAttribute {
         buffer: Option<glow::Buffer>,
         buffer_desc: VertexBufferDesc,

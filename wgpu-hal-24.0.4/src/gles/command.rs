@@ -22,6 +22,7 @@ pub(super) struct State {
     color_targets: ArrayVec<super::ColorTargetDesc, { crate::MAX_COLOR_ATTACHMENTS }>,
     stencil: super::StencilState,
     depth_bias: wgt::DepthBiasState,
+    sample_mask: Option<u64>,
     alpha_to_coverage_enabled: bool,
     samplers: [Option<glow::Sampler>; super::MAX_SAMPLERS],
     texture_slots: [TextureSlotDesc; super::MAX_TEXTURE_SLOTS],
@@ -51,6 +52,7 @@ impl Default for State {
             color_targets: Default::default(),
             stencil: Default::default(),
             depth_bias: Default::default(),
+            sample_mask: None,
             alpha_to_coverage_enabled: Default::default(),
             samplers: Default::default(),
             texture_slots: Default::default(),
@@ -949,6 +951,10 @@ impl crate::CommandEncoder for super::CommandEncoder {
             .push(C::ConfigureDepthStencil(aspects));
 
         // set multisampling state
+        if self.state.sample_mask != Some(pipeline.sample_mask) {
+            self.state.sample_mask = Some(pipeline.sample_mask);
+            self.cmd_buffer.commands.push(C::SetSampleMask(pipeline.sample_mask));
+        }
         if pipeline.alpha_to_coverage_enabled != self.state.alpha_to_coverage_enabled {
             self.state.alpha_to_coverage_enabled = pipeline.alpha_to_coverage_enabled;
             self.cmd_buffer

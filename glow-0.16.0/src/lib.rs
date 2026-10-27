@@ -1914,6 +1914,8 @@ pub trait HasContext: __private::Sealed {
 
     unsafe fn sample_coverage(&self, value: f32, invert: bool);
 
+    unsafe fn sample_mask_i(&self, index: u32, mask: u32);
+
     unsafe fn get_internal_format_i32_slice(
         &self,
         target: u32,

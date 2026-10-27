@@ -24,7 +24,7 @@ fn get_2d_target(target: u32, array_layer: u32) -> u32 {
     ];
 
     match target {
-        glow::TEXTURE_2D => target,
+        glow::TEXTURE_2D | glow::TEXTURE_2D_MULTISAMPLE => target,
         glow::TEXTURE_CUBE_MAP => CUBEMAP_FACES[array_layer as usize],
         _ => unreachable!(),
     }
@@ -32,7 +32,8 @@ fn get_2d_target(target: u32, array_layer: u32) -> u32 {
 
 fn get_z_offset(target: u32, base: &crate::TextureCopyBase) -> u32 {
     match target {
-        glow::TEXTURE_2D_ARRAY | glow::TEXTURE_CUBE_MAP_ARRAY => base.array_layer,
+        glow::TEXTURE_2D_ARRAY | glow::TEXTURE_2D_MULTISAMPLE_ARRAY |
+            glow::TEXTURE_CUBE_MAP_ARRAY => base.array_layer,
         glow::TEXTURE_3D => base.origin.z,
         _ => unreachable!(),
     }
@@ -74,6 +75,9 @@ impl super::Queue {
     }
 
     unsafe fn reset_state(&self, gl: &glow::Context) {
+        // Another logical device can bind or delete its VAO in this context.
+        // Restore our device's VAO before changing its element-buffer state.
+        unsafe { gl.bind_vertex_array(Some(self.main_vao)) };
         unsafe { gl.use_program(None) };
         unsafe { gl.bind_framebuffer(glow::FRAMEBUFFER, None) };
         unsafe { gl.disable(glow::DEPTH_TEST) };
@@ -1109,6 +1113,11 @@ impl super::Queue {
                 ref dst,
                 ref size,
             } => {
+                // Resolves cover the whole attachment, independent of the last
+                // draw's scissor. This command ends a render pass; ResetFramebuffer
+                // resets state before the next pass and SetScissor enables its
+                // own rectangle before any subsequent scissored draw.
+                unsafe { gl.disable(glow::SCISSOR_TEST) };
                 unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(self.draw_fbo)) };
                 unsafe { gl.read_buffer(attachment) };
                 unsafe { gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(self.copy_fbo)) };
@@ -1388,6 +1397,17 @@ impl super::Queue {
                     unsafe { gl.disable(glow::SAMPLE_ALPHA_TO_COVERAGE) };
                 }
             }
+            C::SetSampleMask(mask) => {
+                if mask == !0 {
+                    unsafe { gl.disable(glow::SAMPLE_MASK) };
+                } else {
+                    unsafe { gl.enable(glow::SAMPLE_MASK) };
+                    unsafe { gl.sample_mask_i(0, mask as u32) };
+                    if unsafe { gl.get_parameter_i32(glow::MAX_SAMPLE_MASK_WORDS) } > 1 {
+                        unsafe { gl.sample_mask_i(1, (mask >> 32) as u32) };
+                    }
+                }
+            }
             C::SetProgram(program) => {
                 unsafe { gl.use_program(Some(program)) };
             }
@@ -1515,21 +1535,28 @@ impl super::Queue {
                 unsafe { gl.active_texture(glow::TEXTURE0 + slot) };
                 unsafe { gl.bind_texture(target, Some(texture)) };
 
-                unsafe {
-                    gl.tex_parameter_i32(target, glow::TEXTURE_BASE_LEVEL, mip_levels.start as i32)
-                };
-                unsafe {
-                    gl.tex_parameter_i32(
-                        target,
-                        glow::TEXTURE_MAX_LEVEL,
-                        (mip_levels.end - 1) as i32,
-                    )
-                };
+                // Multisample textures have exactly one level and reject
+                // TEXTURE_BASE_LEVEL/TEXTURE_MAX_LEVEL parameters.
+                if target != glow::TEXTURE_2D_MULTISAMPLE &&
+                    target != glow::TEXTURE_2D_MULTISAMPLE_ARRAY {
+                    unsafe {
+                        gl.tex_parameter_i32(target, glow::TEXTURE_BASE_LEVEL, mip_levels.start as i32)
+                    };
+                    unsafe {
+                        gl.tex_parameter_i32(
+                            target,
+                            glow::TEXTURE_MAX_LEVEL,
+                            (mip_levels.end - 1) as i32,
+                        )
+                    };
+                }
 
                 let version = gl.version();
                 let is_min_es_3_1 = version.is_embedded && (version.major, version.minor) >= (3, 1);
                 let is_min_4_3 = !version.is_embedded && (version.major, version.minor) >= (4, 3);
-                if is_min_es_3_1 || is_min_4_3 {
+                if (is_min_es_3_1 || is_min_4_3) &&
+                    target != glow::TEXTURE_2D_MULTISAMPLE &&
+                    target != glow::TEXTURE_2D_MULTISAMPLE_ARRAY {
                     let mode = match aspects {
                         crate::FormatAspects::DEPTH => Some(glow::DEPTH_COMPONENT),
                         crate::FormatAspects::STENCIL => Some(glow::STENCIL_INDEX),
